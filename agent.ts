@@ -1,4 +1,56 @@
 import * as readline from 'readline';
+
+type ToolCall = { name: string; atgs: any };
+type Message = { role: "user" | "assistant" | "toolResult"; content: any };
+type LLMResponse = { text?: string; toolCall?: ToolCall };
+
+// executeTool function
+
+
+async function executeTool(toolCall: ToolCall): Promise<string> {
+  console.log(`\n [SYSTEM] Executing Tool: ${toolCall.name} with args:`, toolCall.args);
+
+  if(toolCall.name === "calculator") {
+    const { a, b, operation } = toolCall.args;
+    if(operation === "multiply") return String(a * b);
+    if(operation === "add") return String(a + b);
+  }
+  return "Tool execution failed";
+}
+
+
+// Mock llm
+//
+const llm = {
+  async call(params: {system: string, messages: Message[]}): Promise<LLMResponse> {
+    console.log(`\n [LLM] Thinking... (Evaluating ${params.messages.length} messages)`);
+    // Fake network delay
+    await new Promise(resolve => setTimeout(resolve, 1500));
+
+    const lastMessage = params.messages[params.messages.length - 1];
+
+    // Llm decides to use a toolDefinitions
+    if (lastMessage.role === "user" && lastMessage.content.toLowerCase().includes("multiply")) {
+      return {
+        toolCall: {
+          name: "calculator", args: {a: 5, b: 5, operation "multiply"}
+        }
+      };
+    }
+
+    // Last message waw a tool result
+    if (lastMessage.role === "toolResult") {
+      return {
+        text: `Based on my tool, the answer is ${lastMessage.content}`
+      };
+    }
+
+    // General chatter
+    //
+    return {text:  "I am a simple bot. Try asking me to 'multiply 5 by 5'."};
+  }
+}
+
 const rl = readline.createInterface({input: process.stdin, outpu: process.stdout});
 const getInput = (): Promise<string> => new Promise(resolve => rl.question("\nYout: ", resolve));
 const display = (text: string) => console.log(`\nAgent: ${text}`);
