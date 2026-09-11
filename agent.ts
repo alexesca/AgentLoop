@@ -1,6 +1,6 @@
 import * as readline from 'readline';
 
-type ToolCall = { name: string; atgs: any };
+type ToolCall = { name: string; args: Record<string, unknown> };
 type Message = { role: "user" | "assistant" | "toolResult"; content: any };
 type LLMResponse = { text?: string; toolCall?: ToolCall };
 
@@ -12,8 +12,11 @@ async function executeTool(toolCall: ToolCall): Promise<string> {
 
   if(toolCall.name === "calculator") {
     const { a, b, operation } = toolCall.args;
-    if(operation === "multiply") return String(a * b);
-    if(operation === "add") return String(a + b);
+    if (typeof a !== "number" || typeof b !== "number" || typeof operation !== "string") {
+      return "Tool execution failed: calculator expects numeric a and b and a string operation.";
+    }
+    if (operation === "multiply") return String(a * b);
+    if (operation === "add") return String(a + b);
   }
   return "Tool execution failed";
 }
@@ -28,12 +31,15 @@ const llm = {
     await new Promise(resolve => setTimeout(resolve, 1500));
 
     const lastMessage = params.messages[params.messages.length - 1];
+    if (!lastMessage) {
+      return { text: "I am a simple bot. Try asking me to 'multiply 5 by 5'." };
+    }
 
     // Llm decides to use a toolDefinitions
     if (lastMessage.role === "user" && lastMessage.content.toLowerCase().includes("multiply")) {
       return {
         toolCall: {
-          name: "calculator", args: {a: 5, b: 5, operation "multiply"}
+          name: "calculator", args: { a: 5, b: 5, operation: "multiply" }
         }
       };
     }
@@ -51,8 +57,11 @@ const llm = {
   }
 }
 
-const rl = readline.createInterface({input: process.stdin, outpu: process.stdout});
-const getInput = (): Promise<string> => new Promise(resolve => rl.question("\nYout: ", resolve));
+const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+let inputClosed = false;
+rl.once("close", () => {
+  inputClosed = true;
+});
 const display = (text: string) => console.log(`\nAgent: ${text}`);
 
 // The agent loop
@@ -62,13 +71,19 @@ const systemPrompt = "you are an agent.";
 const memoryFiles = "";
 const toolDefinitions = " [Available tools: calculator]";
 
-async funciton startAgent() {
+async function startAgent() {
   console.log("Agent started! Type 'exit' to quit.");
+  rl.setPrompt("\nYou: ");
+  rl.prompt();
 
   // OUTER LOOP
-  while (true) {
-    const userInput = await getInput();
-    if(userInput === "exit") break; // this breaks the outer loop
+  for await (const line of rl) {
+    const userInput = line.trim();
+    if (!userInput) {
+      if (!inputClosed) rl.prompt();
+      continue;
+    }
+    if (userInput.toLowerCase() === "exit") break; // this breaks the outer loop
     
     messages.push({role: "user", content: userInput})
 
@@ -80,7 +95,7 @@ async funciton startAgent() {
       });
 
       // Stringify the response
-      message.push({role: "assistant", content: JSON.stringify(response)});
+      messages.push({ role: "assistant", content: JSON.stringify(response) });
 
       if(response.toolCall){
         const result  = await executeTool(response.toolCall);
@@ -91,6 +106,13 @@ async funciton startAgent() {
         break; // This breaks the inner loop
       }
     }
+    if (!inputClosed) rl.prompt();
   }
   rl.close();
 }
+
+startAgent().catch((error: unknown) => {
+  console.error("Agent failed:", error);
+  rl.close();
+  process.exitCode = 1;
+});
