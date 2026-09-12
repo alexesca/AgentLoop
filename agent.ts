@@ -4,6 +4,11 @@ type ToolCall = { name: string; args: any };
 type Message = { role: "user" | "assistant" | "toolResult"; content: any };
 type LLMResponse = { text?: string; toolCall?: ToolCall };
 
+
+const MODEL = "qwen2.5:7b";
+const LLM_URL = "http://localhost:11434/v1/chat/completions";
+
+
 // executeTool function
 
 
@@ -18,36 +23,54 @@ async function executeTool(toolCall: ToolCall): Promise<string> {
   return "Tool execution failed";
 }
 
+// Parse LLM response
 
-// Mock llm
-//
+function parseLLMResponse(raw: string): LLMResponse {
+  const match = raw.match(/\{[\s\S]*\}/);
+  if(!match) return { test:raw };
+
+  try {
+    const parsed = JSON.parse(match[0]);
+    if(parsed.toolCall) return {toolCall: parsed.toolCall};
+    if (typeof parsed.text === "string") return {text:parsed.text};
+    return {text:raw};
+  } catch {
+    return {test: raw};
+  }
+}
+
+
 const llm = {
   async call(params: {system: string, messages: Message[]}): Promise<LLMResponse> {
     console.log(`\n [LLM] Thinking... (Evaluating ${params.messages.length} messages)`);
-    // Fake network delay
-    await new Promise(resolve => setTimeout(resolve, 1500));
 
-    const lastMessage = params.messages[params.messages.length - 1]!;
-
-    // Llm decides to use a toolDefinitions
-    if (lastMessage.role === "user" && lastMessage.content.toLowerCase().includes("multiply")) {
-      return {
-        toolCall: {
-          name: "calculator", args: {a: 5, b: 5, operation: "multiply"}
+    const messages = [
+      {role: "system", content: params.system},
+      ...params.messages.map((message) => {
+        if(message.role === "toolResult") {
+          return { role: "user", content: `Tool result: ${message.content}`};
         }
-      };
+        return {
+          role: message.role,
+          content: typeof message.content === "string" ? message.content : JSON.stringify(message.content),
+        };
+      }),
+    ];
+
+    const res = await fetch(LLM_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json"},
+      body: JSON.stringify({model: MODEL, messages, temperature: 0}),
+    });
+
+    if(!res.ok) {
+      const error = await res.text();
+      throw new Error(`LLM request failed (${res.status}): ${error}`);
     }
 
-    // Last message waw a tool result
-    if (lastMessage.role === "toolResult") {
-      return {
-        text: `Based on my tool, the answer is ${lastMessage.content}`
-      };
-    }
-
-    // General chatter
-    //
-    return {text:  "I am a simple bot. Try asking me to 'multiply 5 by 5'."};
+    const data = await res.json();
+    cosnt raw: string = data.choices?.[0]?.message?.content ?? "";
+    return parseLLMResponse(raw);
   }
 }
 
