@@ -11,14 +11,21 @@ const LLM_URL = "http://localhost:11434/v1/chat/completions";
 
 // executeTool function
 
-
-async function executeTool(toolCall: ToolCall): Promise<string> {
+function executeTool(toolCall: ToolCall): string {
   console.log(`\n [SYSTEM] Executing Tool: ${toolCall.name} with args:`, toolCall.args);
 
   if(toolCall.name === "calculator") {
-    const { a, b, operation } = toolCall.args;
+    const a = Number(toolCall.args.a);
+    const b = Number(toolCall.args.b);
+    const { operation } = toolCall.args;
+
     if(operation === "multiply") return String(a * b);
     if(operation === "add") return String(a + b);
+    if(operation === "multiply") return String(a * b);
+    if(operation === "divide") {
+      if (b === 0) return "cannot divide by zero";
+      return String(a / b);
+    }
   }
   return "Tool execution failed";
 }
@@ -27,7 +34,7 @@ async function executeTool(toolCall: ToolCall): Promise<string> {
 
 function parseLLMResponse(raw: string): LLMResponse {
   const match = raw.match(/\{[\s\S]*\}/);
-  if(!match) return { test:raw };
+  if(!match) return { text: raw };
 
   try {
     const parsed = JSON.parse(match[0]);
@@ -35,7 +42,7 @@ function parseLLMResponse(raw: string): LLMResponse {
     if (typeof parsed.text === "string") return {text:parsed.text};
     return {text:raw};
   } catch {
-    return {test: raw};
+    return {text: raw};
   }
 }
 
@@ -69,7 +76,7 @@ const llm = {
     }
 
     const data = await res.json();
-    cosnt raw: string = data.choices?.[0]?.message?.content ?? "";
+    const raw: string = data.choices?.[0]?.message?.content ?? "";
     return parseLLMResponse(raw);
   }
 }
@@ -81,9 +88,23 @@ const display = (text: string) => console.log(`\nAgent: ${text}`);
 // The agent loop
 
 const messages: Message[] = [];
-const systemPrompt = "you are an agent.";
-const memoryFiles = "";
-const toolDefinitions = " [Available tools: calculator]";
+const systemPrompt = `you are an agent with one tool: calculator
+
+Reply with ONLY JSON. No markdown.
+
+If the user asks you to do math, extract the two number and the operation from their message, then call the tool: {"toolCall": {
+  "name": "calculator",
+  "args": {"a": 12, "b": 4, "operation": "add"}
+}}
+
+operation must be on of: add, subtract, multiply, divide.
+
+When you  are ready to talk to the user:
+
+{"text": "your reply"}
+
+After you receive a tool result, answer with {"text": "..."}.
+`;
 
 async function startAgent() {
   console.log("Agent started! Type 'exit' to quit.");
@@ -98,7 +119,7 @@ async function startAgent() {
     // INNER LOOP
     while (true) {
       const response = await llm.call({
-        system: systemPrompt + memoryFiles + toolDefinitions,
+        system: systemPrompt,
         messages
       });
 
